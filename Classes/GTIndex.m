@@ -34,14 +34,28 @@
 #import "GTRepository+Private.h"
 #import "GTOID.h"
 #import "GTTree.h"
-
 #import "EXTScope.h"
+
+// The block synonymous with libgit2's `git_index_matched_path_cb` callback.
+typedef BOOL (^GTIndexPathspecMatchedBlock)(NSString *matchedPathspec, NSString *path, BOOL *stop);
 
 @interface GTIndex ()
 @property (nonatomic, assign, readonly) git_index *git_index;
 @end
 
 @implementation GTIndex
+
+#pragma mark Properties
+
+- (NSURL *)fileURL {
+	const char *cPath = git_index_path(self.git_index);
+	if (cPath == NULL) return nil;
+
+	NSString *path = [NSFileManager.defaultManager stringWithFileSystemRepresentation:cPath length:strlen(cPath)];
+	if (path == nil) return nil;
+
+	return [NSURL fileURLWithPath:path];
+}
 
 #pragma mark NSObject
 
@@ -55,11 +69,20 @@
 	if (_git_index != NULL) git_index_free(_git_index);
 }
 
-- (id)initWithFileURL:(NSURL *)fileURL error:(NSError **)error {
-	NSParameterAssert(fileURL != nil);
++ (instancetype)inMemoryIndexWithRepository:(GTRepository *)repository error:(NSError **)error {
+	git_index *index = NULL;
+	int status = git_index_new(&index);
+	if (status != GIT_OK) {
+		if (error != NULL) *error = [NSError git_errorFor:status description:@"Failed to initialize in-memory index"];
+		return nil;
+	}
 
-	self = [super init];
-	if (self == nil) return nil;
+	return [[self alloc] initWithGitIndex:index repository:repository];
+}
+
++ (instancetype)indexWithFileURL:(NSURL *)fileURL repository:(GTRepository *)repository error:(NSError **)error {
+	NSParameterAssert(fileURL != nil);
+	NSParameterAssert(fileURL.isFileURL);
 
 	git_index *index = NULL;
 	int status = git_index_open(&index, fileURL.path.fileSystemRepresentation);
@@ -68,10 +91,7 @@
 		return nil;
 	}
 
-	_fileURL = [fileURL copy];
-	_git_index = index;
-
-	return self;
+	return [[self alloc] initWithGitIndex:index repository:repository];
 }
 
 - (id)initWithGitIndex:(git_index *)index repository:(GTRepository *)repository {
@@ -120,7 +140,7 @@
 
 - (GTIndexEntry *)entryWithName:(NSString *)name error:(NSError **)error {
 	size_t pos = 0;
-	int gitError = git_index_find(&pos, self.git_index, name.UTF8String);
+	int gitError = git_index_find(&pos, self.git_index, name.fileSystemRepresentation);
 	if (gitError != GIT_OK) {
 		if (error != NULL) *error = [NSError git_errorFor:gitError description:@"%@ not found in index", name];
 		return NULL;
@@ -138,13 +158,57 @@
 	return YES;
 }
 
+
+- (BOOL)removeEntry:(GTIndexEntry *)entry error:(NSError **)error {
+	int stage = git_index_entry_stage(entry.git_index_entry);
+	int status = git_index_remove(self.git_index, entry.path.fileSystemRepresentation, stage);
+	if (status != GIT_OK) {
+		if (error != NULL) *error = [NSError git_errorFor:status description:@"Failed to remove entry from index."];
+		return NO;
+	}
+
+	return YES;
+}
+
+- (BOOL)removeConflict:(NSString *)file error:(NSError **)error {
+	int status = git_index_conflict_remove(self.git_index, file.fileSystemRepresentation);
+	if (status != GIT_OK) {
+		if (error != NULL) *error = [NSError git_errorFor:status description:@"Failed to remove entry from index."];
+		return NO;
+	}
+
+	return YES;
+}
+
 - (BOOL)addFile:(NSString *)file error:(NSError **)error {
-	int status = git_index_add_bypath(self.git_index, file.UTF8String);
+	int status = git_index_add_bypath(self.git_index, file.fileSystemRepresentation);
 	if (status != GIT_OK) {
 		if (error != NULL) *error = [NSError git_errorFor:status description:@"Failed to add file %@ to index.", file];
 		return NO;
 	}
 
+	return YES;
+}
+
+- (BOOL)addContentsOfTree:(GTTree *)tree error:(NSError **)error {
+	NSParameterAssert(tree != nil);
+
+	int status = git_index_read_tree(self.git_index, tree.git_tree);
+	if (status != GIT_OK) {
+		if (error != NULL) *error = [NSError git_errorFor:status description:@"Failed to read tree %@ into index.", tree];
+		return NO;
+	}
+
+	return YES;
+}
+
+- (BOOL)removeFile:(NSString *)file error:(NSError **)error {
+	int status = git_index_remove_bypath(self.git_index, file.fileSystemRepresentation);
+	if (status != GIT_OK) {
+		if (error != NULL) *error = [NSError git_errorFor:status description:@"Failed to remove file %@ from index.", file];
+		return NO;
+	}
+	
 	return YES;
 }
 
@@ -167,6 +231,19 @@
 		return NULL;
 	}
 
+	return [self.repository lookupObjectByGitOid:&oid objectType:GTObjectTypeTree error:NULL];
+}
+
+- (GTTree *)writeTreeToRepository:(GTRepository *)repository error:(NSError **)error {
+	NSParameterAssert(repository != nil);
+	git_oid oid;
+	
+	int status = git_index_write_tree_to(&oid, self.git_index, repository.git_repository);
+	if (status != GIT_OK) {
+		if (error != NULL) *error = [NSError git_errorFor:status description:@"Failed to write index to repository %@", repository];
+		return NULL;
+	}
+	
 	return [self.repository lookupObjectByGitOid:&oid objectType:GTObjectTypeTree error:NULL];
 }
 
@@ -213,15 +290,73 @@
 			return NO;
 		}
 		
-		GTIndexEntry *blockAncestor = [[GTIndexEntry alloc] initWithGitIndexEntry:ancestor];
-		GTIndexEntry *blockOurs = [[GTIndexEntry alloc] initWithGitIndexEntry:ours];
-		GTIndexEntry *blockTheirs = [[GTIndexEntry alloc] initWithGitIndexEntry:theirs];
+		GTIndexEntry *blockAncestor;
+		if (ancestor != NULL) {
+			blockAncestor = [[GTIndexEntry alloc] initWithGitIndexEntry:ancestor];
+		}
+
+		GTIndexEntry *blockOurs;
+		if (ours != NULL) {
+			blockOurs = [[GTIndexEntry alloc] initWithGitIndexEntry:ours];
+		}
+
+		GTIndexEntry *blockTheirs;
+		if (theirs != NULL) {
+			blockTheirs = [[GTIndexEntry alloc] initWithGitIndexEntry:theirs];
+		}
+
 		BOOL stop = NO;
 		block(blockAncestor, blockOurs, blockTheirs, &stop);
 		if (stop) break;
 	}
 	
 	return YES;
+}
+
+struct GTIndexPathspecMatchedInfo {
+	__unsafe_unretained GTIndexPathspecMatchedBlock block;
+	BOOL shouldAbortImmediately;
+};
+
+- (BOOL)updatePathspecs:(NSArray *)pathspecs error:(NSError **)error passingTest:(GTIndexPathspecMatchedBlock)block {
+	NSAssert(self.repository.isBare == NO, @"This method only works with non-bare repositories.");
+	
+	const git_strarray strarray = pathspecs.git_strarray;
+	struct GTIndexPathspecMatchedInfo payload = {
+		.block = block,
+		.shouldAbortImmediately = NO,
+	};
+
+	int returnCode = git_index_update_all(self.git_index, &strarray, (block != nil ? GTIndexPathspecMatchFound : NULL), &payload);
+	if (returnCode != GIT_OK && returnCode != GIT_EUSER) {
+		if (error != nil) *error = [NSError git_errorFor:returnCode description:NSLocalizedString(@"Could not update index.", nil)];
+		return NO;
+	}
+	
+	return YES;
+}
+
+int GTIndexPathspecMatchFound(const char *path, const char *matched_pathspec, void *payload) {
+	struct GTIndexPathspecMatchedInfo *info = payload;
+	GTIndexPathspecMatchedBlock block = info->block;
+	if (info->shouldAbortImmediately) {
+		return GIT_EUSER;
+	}
+	
+	BOOL shouldStop = NO;
+	NSString *matchedPathspec = (matched_pathspec != nil ? @(matched_pathspec): nil);
+	BOOL shouldUpdate = block(matchedPathspec, @(path), &shouldStop);
+	
+	if (shouldUpdate) {
+		if (shouldStop) {
+			info->shouldAbortImmediately = YES;
+		}
+		return 0;
+	} else if (shouldStop) {
+		return GIT_EUSER;
+	} else {
+		return 1;
+	}
 }
 
 @end

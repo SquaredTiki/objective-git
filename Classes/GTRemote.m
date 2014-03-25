@@ -335,6 +335,7 @@ int GTRemoteTransferProgressCallback(const git_transfer_progress *stats, void *p
 		return NO;
 	}
 
+	git_remote_check_cert(self.git_remote, 0);
 	gitError = git_remote_connect(self.git_remote, info->direction);
 	if (gitError != GIT_OK) {
 		if (error != NULL) *error = [NSError git_errorFor:gitError description:@"Failed to connect remote"];
@@ -392,7 +393,7 @@ int GTRemotePushTransferProgressCallback(unsigned int current, unsigned int tota
 	if (pushPayload->transferProgressBlock)
 		pushPayload->transferProgressBlock(current, total, bytes, &stop);
 
-	return (stop == YES ? 0 : 1);
+	return stop;
 }
 
 - (BOOL)pushBranches:(NSArray *)branches withCredentialProvider:(GTCredentialProvider *)credProvider error:(NSError **)error progress:(GTRemotePushTransferProgressBlock)progressBlock {

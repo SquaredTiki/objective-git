@@ -28,6 +28,7 @@
 //
 
 #import "GTIndexEntry.h"
+#import "GTOID.h"
 #import "NSError+Git.h"
 #import "NSString+Git.h"
 
@@ -84,6 +85,10 @@
 	}
 	
 	return GTIndexEntryStatusUpToDate;
+}
+
+- (GTOID *)OID {
+	return [GTOID oidWithGitOid:&self.git_index_entry->oid];
 }
 
 @end

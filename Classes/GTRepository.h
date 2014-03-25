@@ -376,6 +376,19 @@ extern NSString *const GTRepositoryCloneOptionsCredentialProvider;
 // Returns YES if operation was successful, NO otherwise
 - (BOOL)checkoutCommit:(GTCommit *)targetCommit strategy:(GTCheckoutStrategyType)strategy notifyFlags:(GTCheckoutNotifyFlags)notifyFlags error:(NSError **)error progressBlock:(void (^)(NSString *path, NSUInteger completedSteps, NSUInteger totalSteps))progressBlock notifyBlock:(int (^)(GTCheckoutNotifyFlags why, NSString *path, GTDiffFile *baseline, GTDiffFile *target, GTDiffFile *workdir))notifyBlock;
 
+// Checkout a tree
+//
+// targetTree    - The tree to checkout.
+// strategy      - The checkout strategy to use.
+// notifyFlags   - Flags that indicate which notifications should cause `notifyBlock`
+//                 to be called.
+// error         - The error if one occurred. Can be NULL.
+// notifyBlock   - The block to call back for notification handling. Can be nil.
+// progressBlock - The block to call back for progress updates. Can be nil.
+//
+// Returns YES if operation was successful, NO otherwise
+- (BOOL)checkoutTree:(GTTree *)targetTree strategy:(GTCheckoutStrategyType)strategy notifyFlags:(GTCheckoutNotifyFlags)notifyFlags error:(NSError **)error progressBlock:(void (^)(NSString *path, NSUInteger completedSteps, NSUInteger totalSteps))progressBlock notifyBlock:(int (^)(GTCheckoutNotifyFlags why, NSString *path, GTDiffFile *baseline, GTDiffFile *target, GTDiffFile *workdir))notifyBlock;
+
 // Checkout a reference
 //
 // targetCommit  - The reference to checkout.

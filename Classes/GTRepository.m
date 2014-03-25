@@ -761,7 +761,7 @@ static int checkoutNotifyCallback(git_checkout_notify_t why, const char *path, c
 	if (gitError < GIT_OK) {
 		if (error != NULL) *error = [NSError git_errorFor:gitError description:@"Failed to checkout tree."];
 	}
-	
+
 	return gitError == GIT_OK;
 }
 
@@ -785,6 +785,25 @@ static int checkoutNotifyCallback(git_checkout_notify_t why, const char *path, c
 
 - (BOOL)checkoutReference:(GTReference *)target strategy:(GTCheckoutStrategyType)strategy error:(NSError **)error progressBlock:(GTCheckoutProgressBlock)progressBlock {
 	return [self checkoutReference:target strategy:strategy notifyFlags:GTCheckoutNotifyNone error:error progressBlock:progressBlock notifyBlock:nil];
+}
+
+- (BOOL)checkoutTree:(GTTree *)targetTree strategy:(GTCheckoutStrategyType)strategy notifyFlags:(GTCheckoutNotifyFlags)notifyFlags error:(NSError **)error progressBlock:(void (^)(NSString *path, NSUInteger completedSteps, NSUInteger totalSteps))progressBlock notifyBlock:(int (^)(GTCheckoutNotifyFlags why, NSString *path, GTDiffFile *baseline, GTDiffFile *target, GTDiffFile *workdir))notifyBlock {
+
+	git_checkout_opts checkoutOptions = GIT_CHECKOUT_OPTS_INIT;
+	checkoutOptions.checkout_strategy = GTCheckoutStrategySafe;
+	checkoutOptions.progress_cb = checkoutProgressCallback;
+	checkoutOptions.progress_payload = (__bridge void *)progressBlock;
+
+	checkoutOptions.notify_cb = checkoutNotifyCallback;
+	checkoutOptions.notify_flags = GTCheckoutNotifyAll;
+	checkoutOptions.notify_payload = (__bridge void *)notifyBlock;
+
+    int gitError = git_checkout_tree(self.git_repository, targetTree.git_object, &checkoutOptions);
+	if (gitError < GIT_OK) {
+		if (error != NULL) *error = [NSError git_errorFor:gitError description:@"Failed to checkout tree."];
+	}
+
+	return gitError == GIT_OK;
 }
 
 @end

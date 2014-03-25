@@ -49,6 +49,7 @@
 #import <ObjectiveGit/GTOID.h>
 #import <ObjectiveGit/GTSubmodule.h>
 #import <ObjectiveGit/GTStatusDelta.h>
+#import <ObjectiveGit/GTCredential.h>
 
 #import <ObjectiveGit/GTObjectDatabase.h>
 #import <ObjectiveGit/GTOdbObject.h>

@@ -37,6 +37,8 @@ typedef enum {
 	GTIndexEntryStatusUpToDate,
 } GTIndexEntryStatus;
 
+@class GTOID;
+
 @interface GTIndexEntry : NSObject
 
 // The repository-relative path for the entry.
@@ -47,6 +49,9 @@ typedef enum {
 
 // What is the entry's status?
 @property (nonatomic, readonly) GTIndexEntryStatus status;
+
+// Retrieves the OID
+@property (nonatomic, readonly) GTOID *OID;
 
 // Initializes the receiver with the given libgit2 index entry.
 //
